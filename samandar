@@ -1,0 +1,111 @@
+import telebot
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
+import os
+
+TOKEN = "7834061556:AAE45QkMxCq_PIjPbyK0XhaLwl3MXaW5YuM"
+bot = telebot.TeleBot(TOKEN)
+
+# Til tanlash
+language_keyboard = InlineKeyboardMarkup()
+language_keyboard.add(
+    InlineKeyboardButton("🇺🇿 O'zbekcha", callback_data="lang_uz"),
+    InlineKeyboardButton("🇷🇺 Русский", callback_data="lang_ru"),
+    InlineKeyboardButton("🇬🇧 English", callback_data="lang_en")
+)
+
+# Bosh menyu
+menu_keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
+menu_keyboard.add(
+    KeyboardButton("📖 Namoz o‘qishni o‘rganish"),
+    KeyboardButton("🕌 Namoz vaqtlari"), KeyboardButton("🌙 Tahajjud"),
+    KeyboardButton("📝 Diniy savollar"), KeyboardButton("🎧 Diniy audiolar"),
+    KeyboardButton("📜 Hadislar"), KeyboardButton("📖 Tafsir"),
+    KeyboardButton("🔙 Orqaga")
+)
+
+# Namoz o‘rganish menyusi
+prayer_keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
+prayer_keyboard.add(
+    KeyboardButton("🕌 Bomdod"), KeyboardButton("🌞 Peshin"),
+    KeyboardButton("🌆 Shom"), KeyboardButton("🌃 Xufton"),
+    KeyboardButton("🔙 Bosh menuga qaytish")
+)
+
+# Bomdod fayllari yo'li
+bomdod_path = "bomdod"
+user_positions = {}
+
+def get_bomdod_files():
+    return sorted([f.split('.')[0] for f in os.listdir(bomdod_path) if f.endswith('.jpeg')])
+
+@bot.message_handler(commands=['start'])
+def start_command(message):
+    user_name = message.from_user.first_name
+    bot.send_message(message.chat.id, f"Salom, {user_name}! 👋\nTilni tanlang:", reply_markup=language_keyboard)
+
+@bot.callback_query_handler(func=lambda call: True)
+def language_selected(call):
+    if call.data == "lang_uz":
+        bot.send_message(call.message.chat.id, "✅ Til o‘zgartirildi: O‘zbekcha", reply_markup=menu_keyboard)
+    elif call.data == "lang_ru":
+        bot.send_message(call.message.chat.id, "✅ Язык изменён: Русский", reply_markup=menu_keyboard)
+    elif call.data == "lang_en":
+        bot.send_message(call.message.chat.id, "✅ Language changed: English", reply_markup=menu_keyboard)
+    bot.answer_callback_query(call.id)
+
+@bot.message_handler(func=lambda message: True)
+def handle_buttons(message):
+    user_id = message.chat.id
+    text = message.text
+    
+    if text == "📖 Namoz o‘qishni o‘rganish":
+        bot.send_message(user_id, "Qaysi namozni o‘rganmoqchisiz?", reply_markup=prayer_keyboard)
+    elif text == "🕌 Bomdod":
+        user_positions[user_id] = 0
+        send_bomdod_step(user_id)
+    elif text == "🔙 Bosh menuga qaytish":
+        bot.send_message(user_id, "Bosh sahifaga qaytish", reply_markup=menu_keyboard)
+    else:
+        bot.send_message(user_id, "Tanlov noto‘g‘ri, iltimos, menyudan foydalaning.")
+
+def send_bomdod_step(user_id):
+    files = get_bomdod_files()
+    if user_id not in user_positions:
+        return
+    
+    index = user_positions[user_id]
+    if index < 0 or index >= len(files):
+        return
+    
+    img_path = os.path.join(bomdod_path, f"{files[index]}.jpeg")
+    text_path = os.path.join(bomdod_path, f"{files[index]}.text")
+    
+    keyboard = InlineKeyboardMarkup()
+    if index > 0:
+        keyboard.add(InlineKeyboardButton("⬅️ Ortga", callback_data="prev_bomdod"))
+    if index < len(files) - 1:
+        keyboard.add(InlineKeyboardButton("➡️ Keyingisi", callback_data="next_bomdod"))
+    
+    text_content = ""
+    if os.path.exists(text_path):
+        with open(text_path, "r", encoding="utf-8") as text_file:
+            text_content = text_file.read()
+    
+    with open(img_path, "rb") as img_file:
+        bot.send_photo(user_id, img_file, caption=text_content, reply_markup=keyboard)
+
+@bot.callback_query_handler(func=lambda call: call.data in ["next_bomdod", "prev_bomdod"])
+def navigate_bomdod(call):
+    user_id = call.message.chat.id
+    if user_id not in user_positions:
+        return
+    
+    if call.data == "next_bomdod":
+        user_positions[user_id] += 1
+    elif call.data == "prev_bomdod":
+        user_positions[user_id] -= 1
+    
+    send_bomdod_step(user_id)
+    bot.answer_callback_query(call.id)
+
+bot.polling(none_stop=True)
